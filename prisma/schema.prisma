@@ -1,0 +1,222 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                  String             @id @default(cuid())
+  email               String             @unique
+  username            String?            @unique
+  password            String
+  role                Role               @default(USER)
+  bio                 String?
+  phone               String?
+  location            String?
+  avatar              String?
+  sentFriendships     Friendship[]       @relation("SentFriendships")
+  receivedFriendships Friendship[]       @relation("ReceivedFriendships")
+  conversationsAsA    Conversation[]     @relation("ConvUserA")
+  conversationsAsB    Conversation[]     @relation("ConvUserB")
+  sentMessages        Message[]          @relation("MessageSender")
+  createdGroups       GroupConversation[] @relation("GroupCreator")
+  groupMemberships    GroupMember[]
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  // Presence tracking
+  isOnline            Boolean            @default(false)
+  lastSeen            DateTime           @default(now())
+  socketId            String?
+
+  // Relations for new models
+  reactions           MessageReaction[]
+  messageReads        MessageRead[]
+  messageDeliveries   MessageDelivery[]
+}
+
+// ─── 1:1 Conversations ────────────────────────────────────────────────────────
+
+model Conversation {
+  id             String    @id @default(cuid())
+  userAId        String
+  userBId        String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  lastMessageAt  DateTime?
+  lastMessageId  String?
+
+  userA          User      @relation("ConvUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB          User      @relation("ConvUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  messages       Message[]
+
+  // Settings
+  isArchivedA    Boolean   @default(false)
+  isArchivedB    Boolean   @default(false)
+  isMutedA       Boolean   @default(false)
+  isMutedB       Boolean   @default(false)
+  isPinnedA      Boolean   @default(false)
+  isPinnedB      Boolean   @default(false)
+  isDeletedA     Boolean   @default(false)
+  isDeletedB     Boolean   @default(false)
+
+  @@unique([userAId, userBId])
+  @@index([lastMessageAt])
+}
+
+// ─── Group Conversations ──────────────────────────────────────────────────────
+
+model GroupConversation {
+  id             String        @id @default(cuid())
+  name           String
+  avatar         String?
+  createdBy      String
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  lastMessageAt  DateTime?
+  description    String?
+  isArchived     Boolean       @default(false)
+  isDeleted      Boolean       @default(false)
+
+  creator        User          @relation("GroupCreator", fields: [createdBy], references: [id])
+  members        GroupMember[]
+  messages       Message[]
+
+  @@index([lastMessageAt])
+}
+
+enum GroupRole {
+  ADMIN
+  MEMBER
+}
+
+model GroupMember {
+  id         String            @id @default(cuid())
+  groupId    String
+  userId     String
+  joinedAt   DateTime          @default(now())
+  role       GroupRole         @default(MEMBER)
+  mutedUntil DateTime?
+
+  group      GroupConversation @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+}
+
+// ─── Unified Message (1:1 or Group) ──────────────────────────────────────────
+
+model Message {
+  id             String             @id @default(cuid())
+  senderId       String
+  content        String
+  sentAt         DateTime           @default(now())
+  conversationId String?
+  groupId        String?
+
+  edited           Boolean            @default(false)
+  editedAt         DateTime?
+  deletedAt        DateTime?
+  replyToMessageId String?
+  attachmentUrl    String?
+  attachmentType   String?
+  metadata         Json?
+
+  sender         User               @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  conversation   Conversation?      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  group          GroupConversation? @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  reactions      MessageReaction[]
+  reads          MessageRead[]
+  deliveries     MessageDelivery[]
+
+  @@index([conversationId, sentAt])
+  @@index([groupId, sentAt])
+  @@index([senderId])
+}
+
+model MessageReaction {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+}
+
+model MessageRead {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  readAt    DateTime @default(now())
+
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([readAt])
+}
+
+model MessageDelivery {
+  id          String   @id @default(cuid())
+  messageId   String
+  userId      String
+  deliveredAt DateTime @default(now())
+
+  message     Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+}
+
+model TrafficLog {
+  id               Int      @id @default(autoincrement())
+  ip               String   @db.VarChar(45)
+  method           String   @db.VarChar(10)
+  url              String
+  statusCode       Int      @map("status_code")
+  responseTime     Int      @map("response_time")
+  userAgent        String?  @map("user_agent")
+  userId           String?  @map("user_id") @db.VarChar(255)
+  userType         String?  @map("user_type") @db.VarChar(20)
+  timestamp        DateTime
+  requestBody      Json?    @map("request_body")
+  errorMessage     String?  @map("error_message")
+  suspicious       Boolean  @default(false)
+  suspicionReasons Json?    @map("suspicion_reasons")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@map("traffic_logs")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+model Friendship {
+  id         String           @id @default(cuid())
+  senderId   String
+  receiverId String
+  status     FriendshipStatus @default(PENDING)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  sender     User             @relation("SentFriendships", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver   User             @relation("ReceivedFriendships", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@unique([senderId, receiverId])
+}
+
+enum FriendshipStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
