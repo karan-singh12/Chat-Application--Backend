@@ -14,6 +14,7 @@ import { PaymentsModule } from "./modules/payments/payments.module";
 import { WebsocketModule } from "./websocket/websocket.module";
 import { JobsModule } from "./jobs/jobs.module";
 import { TrafficMonitorInterceptor } from "./common/interceptors/traffic-monitor.interceptor";
+import { PostsModule } from "./modules/posts/posts.module";
 // import { CacheModule } from "./cache/cache.module";
 
 @Module({
@@ -29,6 +30,7 @@ import { TrafficMonitorInterceptor } from "./common/interceptors/traffic-monitor
     PaymentsModule,
     WebsocketModule,
     JobsModule,
+    PostsModule,
     // CacheModule,
   ],
   controllers: [AppController],
