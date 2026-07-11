@@ -1,7 +1,7 @@
 # Compiled output
 /dist
 /node_modules
-/tsconfig.tsbuildinfo
+*.tsbuildinfo
 
 # Logs
 logs
