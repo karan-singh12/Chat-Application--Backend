@@ -6,6 +6,7 @@ import { FastifyAdapter, NestFastifyApplication } from "@nestjs/platform-fastify
 import { AppModule } from "./app.module";
 import { TransformInterceptor } from "./common/interceptors/transform.interceptor";
 import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
+import { RedisIoAdapter } from "./common/adapters/redis-io.adapter";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import * as path from "path";
@@ -15,6 +16,13 @@ async function bootstrap() {
     AppModule,
     new FastifyAdapter()
   );
+
+  // Register custom Redis adapter for scalable WebSockets
+  const redisIoAdapter = new RedisIoAdapter(app);
+  const isRedisConnected = await redisIoAdapter.connectToRedis();
+  if (isRedisConnected) {
+    app.useWebSocketAdapter(redisIoAdapter);
+  }
 
   // Register fastify multipart parser
   await app.register(multipart, {

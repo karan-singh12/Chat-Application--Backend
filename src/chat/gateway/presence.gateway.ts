@@ -8,6 +8,7 @@ import {
 import { Server, Socket } from "socket.io";
 import { JwtService } from "@nestjs/jwt";
 import { PrismaService } from "../../prisma/prisma.service";
+import { RedisService } from "../../cache/redis.service";
 
 @WebSocketGateway({
   cors: { origin: "*" },
@@ -22,6 +23,7 @@ export class PresenceGateway
   constructor(
     private readonly jwtService: JwtService,
     private readonly prisma: PrismaService,
+    private readonly redisService: RedisService,
   ) {}
 
   afterInit() {
@@ -49,6 +51,15 @@ export class PresenceGateway
       // Join personal room
       client.join(`user:${userId}`);
 
+      let onlineCount = 1;
+      try {
+        const clientRedis = this.redisService.getClient();
+        await clientRedis.sadd(`online_user:${userId}`, client.id);
+        onlineCount = await clientRedis.scard(`online_user:${userId}`);
+      } catch (err) {
+        // Fallback if Redis is offline
+      }
+
       // Update database status
       await this.prisma.user.update({
         where: { id: userId },
@@ -59,8 +70,10 @@ export class PresenceGateway
         },
       });
 
-      // Broadcast presence
-      this.server.emit("userOnline", { userId });
+      // Broadcast presence only if it is the first tab connecting
+      if (onlineCount === 1) {
+        this.server.emit("userOnline", { userId });
+      }
       console.log(`[WS-Presence] Connected: user ${userId} (${client.id})`);
     } catch (err) {
       client.disconnect();
@@ -70,19 +83,31 @@ export class PresenceGateway
   async handleDisconnect(client: Socket) {
     const userId = client.data?.userId;
     if (userId) {
-      // Update database status
-      await this.prisma.user.update({
-        where: { id: userId },
-        data: {
-          isOnline: false,
-          socketId: null,
-          lastSeen: new Date(),
-        },
-      });
+      let onlineCount = 0;
+      try {
+        const clientRedis = this.redisService.getClient();
+        await clientRedis.srem(`online_user:${userId}`, client.id);
+        onlineCount = await clientRedis.scard(`online_user:${userId}`);
+      } catch (err) {
+        // Fallback if Redis is offline
+      }
 
-      // Broadcast offline
-      this.server.emit("userOffline", { userId });
-      console.log(`[WS-Presence] Disconnected: user ${userId}`);
+      // If no active socket sessions remain, update DB and broadcast offline
+      if (onlineCount === 0) {
+        await this.prisma.user.update({
+          where: { id: userId },
+          data: {
+            isOnline: false,
+            socketId: null,
+            lastSeen: new Date(),
+          },
+        });
+
+        this.server.emit("userOffline", { userId });
+        console.log(`[WS-Presence] Disconnected last session: user ${userId}`);
+      } else {
+        console.log(`[WS-Presence] Disconnected session: user ${userId} (remaining tabs: ${onlineCount})`);
+      }
     }
   }
 }

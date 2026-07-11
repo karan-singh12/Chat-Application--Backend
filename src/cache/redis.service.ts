@@ -13,6 +13,10 @@ export class RedisService implements OnModuleDestroy {
       lazyConnect: true,
     });
 
+    this.client.on("error", () => {
+      // Silence to prevent unhandled error event crash when Redis is offline
+    });
+
     this.client.connect().catch((err) => {
       console.warn("Redis connection warning: Redis server might be offline.", err.message);
     });
