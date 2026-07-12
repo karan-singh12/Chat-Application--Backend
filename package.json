@@ -10,7 +10,8 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "dev": "npm run start:dev",
-    "start:prod": "node dist/main"
+    "start:prod": "node dist/main",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@fastify/multipart": "^10.0.0",
