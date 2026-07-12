@@ -70,6 +70,13 @@ export class PresenceGateway
         },
       });
 
+      // Send the list of currently online user IDs to the connected client
+      const onlineUsers = await this.prisma.user.findMany({
+        where: { isOnline: true },
+        select: { id: true },
+      });
+      client.emit("initialOnlineUsers", onlineUsers.map((u) => u.id));
+
       // Broadcast presence only if it is the first tab connecting
       if (onlineCount === 1) {
         this.server.emit("userOnline", { userId });
