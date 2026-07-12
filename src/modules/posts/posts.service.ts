@@ -5,11 +5,12 @@ import { PrismaService } from "../../prisma/prisma.service";
 export class PostsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async createPost(userId: string, content: string) {
+  async createPost(userId: string, content: string, imageUrl?: string) {
     return this.prisma.post.create({
       data: {
         content,
         userId,
+        imageUrl,
       },
       include: {
         user: {

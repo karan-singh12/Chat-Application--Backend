@@ -8,9 +8,13 @@ export class PostsController {
   constructor(private readonly postsService: PostsService) {}
 
   @Post()
-  async createPost(@Req() req: any, @Body("content") content: string) {
+  async createPost(
+    @Req() req: any,
+    @Body("content") content: string,
+    @Body("imageUrl") imageUrl?: string
+  ) {
     const userId = req.user.userId;
-    const post = await this.postsService.createPost(userId, content);
+    const post = await this.postsService.createPost(userId, content, imageUrl);
     return {
       message: "Post created successfully",
       data: post,
