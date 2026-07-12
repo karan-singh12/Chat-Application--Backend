@@ -106,6 +106,26 @@ export class ChatGateway implements OnGatewayInit {
 
       // Broadcast new message to the room
       this.server.to(room).emit("receiveMessage", saved);
+
+      // Also push to personal user rooms for real-time sidebar updates
+      if (dto.conversationId) {
+        const conv = await this.chatService.prisma.conversation.findUnique({
+          where: { id: dto.conversationId },
+          select: { userAId: true, userBId: true },
+        });
+        if (conv) {
+          this.server.to(`user:${conv.userAId}`).emit("receiveMessage", saved);
+          this.server.to(`user:${conv.userBId}`).emit("receiveMessage", saved);
+        }
+      } else if (dto.groupId) {
+        const groupMembers = await this.chatService.prisma.groupMember.findMany({
+          where: { groupId: dto.groupId },
+          select: { userId: true },
+        });
+        groupMembers.forEach((member) => {
+          this.server.to(`user:${member.userId}`).emit("receiveMessage", saved);
+        });
+      }
     } catch (err) {
       client.emit("error", {
         success: false,
@@ -313,6 +333,14 @@ export class ChatGateway implements OnGatewayInit {
     @MessageBody() data: { targetUserId: string }
   ) {
     this.server.to(`user:${data.targetUserId}`).emit("call_ended");
+  }
+
+  @SubscribeMessage("friendRequest")
+  handleFriendRequest(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { targetUserId: string; request: any }
+  ) {
+    this.server.to(`user:${data.targetUserId}`).emit("friendRequest", data.request);
   }
 
   // ─── Rate Limiter Helper ───
