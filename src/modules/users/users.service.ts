@@ -247,6 +247,9 @@ export class UsersService {
       const friend = f.senderId === userId ? f.receiver : f.sender;
       return {
         friendshipId: f.id,
+        senderId: f.senderId,
+        receiverId: f.receiverId,
+        updatedAt: f.updatedAt,
         ...friend,
       };
     });

@@ -343,6 +343,14 @@ export class ChatGateway implements OnGatewayInit {
     this.server.to(`user:${data.targetUserId}`).emit("friendRequest", data.request);
   }
 
+  @SubscribeMessage("acceptFriendRequest")
+  handleAcceptFriendRequest(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { targetUserId: string; request: any }
+  ) {
+    this.server.to(`user:${data.targetUserId}`).emit("acceptFriendRequest", data.request);
+  }
+
   // ─── Rate Limiter Helper ───
 
   private isRateLimited(userId: string, maxRequests: number, timeWindowMs: number): boolean {
