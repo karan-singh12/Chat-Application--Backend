@@ -7,7 +7,12 @@ import { Pool } from "pg";
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   constructor() {
     const connectionString = process.env.DATABASE_URL || "postgresql://postgres:postgres@localhost:5432/chat_db";
-    const pool = new Pool({ connectionString });
+    const pool = new Pool({
+      connectionString,
+      max: 3, // Limit maximum database connections to avoid pool exhaustion
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 2000, // Fail fast rather than hanging
+    });
     const adapter = new PrismaPg(pool);
     super({ adapter });
   }
