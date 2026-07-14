@@ -26,7 +26,7 @@ export class AuthService {
   }
 
   async signup(signupDto: SignupDto) {
-    const { email, password, username, role } = signupDto;
+    const { email, password, username, role, avatar } = signupDto;
 
     if (!email || !password) {
       throw new BadRequestException("Email and password are required");
@@ -69,6 +69,7 @@ export class AuthService {
         password: hashedPassword,
         username: username || null,
         role: assignedRole,
+        avatar: avatar || null,
       },
     });
 

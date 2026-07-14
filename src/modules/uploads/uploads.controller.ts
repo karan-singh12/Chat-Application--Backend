@@ -26,4 +26,23 @@ export class UploadsController {
       },
     };
   }
+
+  @Post("public")
+  @UseInterceptors(MultipartInterceptor)
+  async uploadPublicFile(@Req() req: any) {
+    if (!req.file) {
+      throw new BadRequestException("No file uploaded");
+    }
+
+    const relativeUrl = req.file.path.startsWith("/") ? req.file.path : `/${req.file.path}`;
+
+    return {
+      message: "File uploaded successfully",
+      data: {
+        url: relativeUrl,
+        path: req.file.path,
+        filename: req.file.filename,
+      },
+    };
+  }
 }

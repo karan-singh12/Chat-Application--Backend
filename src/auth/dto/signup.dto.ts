@@ -3,4 +3,5 @@ export class SignupDto {
   password?: string;
   username?: string;
   role?: "USER" | "ADMIN";
+  avatar?: string;
 }

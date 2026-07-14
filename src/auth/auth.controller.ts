@@ -14,6 +14,7 @@ export class AuthController {
       password: body.password,
       username: body.username,
       role: body.role || "USER",
+      avatar: body.avatar,
     };
     return this.authService.signup(signupDto);
   }
