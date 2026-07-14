@@ -54,10 +54,16 @@ export class PresenceGateway
       let onlineCount = 1;
       try {
         const clientRedis = this.redisService.getClient();
-        await clientRedis.sadd(`online_user:${userId}`, client.id);
-        onlineCount = await clientRedis.scard(`online_user:${userId}`);
+        if (clientRedis.status === "ready") {
+          await clientRedis.sadd(`online_user:${userId}`, client.id);
+          onlineCount = await clientRedis.scard(`online_user:${userId}`);
+        } else {
+          const localSockets = this.server.sockets.adapter.rooms.get(`user:${userId}`);
+          onlineCount = localSockets ? localSockets.size : 1;
+        }
       } catch (err) {
-        // Fallback if Redis is offline
+        const localSockets = this.server.sockets.adapter.rooms.get(`user:${userId}`);
+        onlineCount = localSockets ? localSockets.size : 1;
       }
 
       // Update database status
@@ -93,10 +99,18 @@ export class PresenceGateway
       let onlineCount = 0;
       try {
         const clientRedis = this.redisService.getClient();
-        await clientRedis.srem(`online_user:${userId}`, client.id);
-        onlineCount = await clientRedis.scard(`online_user:${userId}`);
+        if (clientRedis.status === "ready") {
+          await clientRedis.srem(`online_user:${userId}`, client.id);
+          onlineCount = await clientRedis.scard(`online_user:${userId}`);
+        } else {
+          const localSockets = this.server.sockets.adapter.rooms.get(`user:${userId}`);
+          const localSize = localSockets ? localSockets.size : 1;
+          onlineCount = Math.max(0, localSize - 1);
+        }
       } catch (err) {
-        // Fallback if Redis is offline
+        const localSockets = this.server.sockets.adapter.rooms.get(`user:${userId}`);
+        const localSize = localSockets ? localSockets.size : 1;
+        onlineCount = Math.max(0, localSize - 1);
       }
 
       // If no active socket sessions remain, update DB and broadcast offline
