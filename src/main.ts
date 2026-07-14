@@ -53,7 +53,7 @@ async function bootstrap() {
   app.useGlobalFilters(new HttpExceptionFilter());
 
   const PORT = process.env.PORT || process.env.API_PORT || 3003;
-  
+
   // Fastify needs 0.0.0.0 or explicit host IP to allow external connections on local networks
   await app.listen(PORT, "0.0.0.0");
   console.log(`NestJS Fastify server running on http://localhost:${PORT}`);
