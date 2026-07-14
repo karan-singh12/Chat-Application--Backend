@@ -38,6 +38,8 @@ model User {
   posts               Post[]
   postLikes           PostLike[]
   postComments        PostComment[]
+  sentCallLogs        CallLog[]          @relation("CallLogsAsCaller")
+  receivedCallLogs    CallLog[]          @relation("CallLogsAsReceiver")
 }
 
 // ─── 1:1 Conversations ────────────────────────────────────────────────────────
@@ -255,4 +257,21 @@ model PostComment {
   createdAt DateTime @default(now())
   post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model CallLog {
+  id          String   @id @default(cuid())
+  callerId    String
+  receiverId  String
+  status      String   // "completed", "missed", "rejected"
+  video       Boolean  @default(false)
+  duration    Int      @default(0) // duration in seconds
+  createdAt   DateTime @default(now())
+
+  caller      User     @relation("CallLogsAsCaller", fields: [callerId], references: [id], onDelete: Cascade)
+  receiver    User     @relation("CallLogsAsReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@index([callerId])
+  @@index([receiverId])
+  @@index([createdAt])
 }
