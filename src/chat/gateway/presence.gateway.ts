@@ -58,11 +58,11 @@ export class PresenceGateway
           await clientRedis.sadd(`online_user:${userId}`, client.id);
           onlineCount = await clientRedis.scard(`online_user:${userId}`);
         } else {
-          const localSockets = this.server.sockets.adapter.rooms.get(`user:${userId}`);
+          const localSockets = (this.server as any).adapter.rooms.get(`user:${userId}`);
           onlineCount = localSockets ? localSockets.size : 1;
         }
       } catch (err) {
-        const localSockets = this.server.sockets.adapter.rooms.get(`user:${userId}`);
+        const localSockets = (this.server as any).adapter.rooms.get(`user:${userId}`);
         onlineCount = localSockets ? localSockets.size : 1;
       }
 
@@ -103,12 +103,12 @@ export class PresenceGateway
           await clientRedis.srem(`online_user:${userId}`, client.id);
           onlineCount = await clientRedis.scard(`online_user:${userId}`);
         } else {
-          const localSockets = this.server.sockets.adapter.rooms.get(`user:${userId}`);
+          const localSockets = (this.server as any).adapter.rooms.get(`user:${userId}`);
           const localSize = localSockets ? localSockets.size : 1;
           onlineCount = Math.max(0, localSize - 1);
         }
       } catch (err) {
-        const localSockets = this.server.sockets.adapter.rooms.get(`user:${userId}`);
+        const localSockets = (this.server as any).adapter.rooms.get(`user:${userId}`);
         const localSize = localSockets ? localSockets.size : 1;
         onlineCount = Math.max(0, localSize - 1);
       }
