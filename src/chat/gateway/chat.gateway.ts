@@ -108,15 +108,10 @@ export class ChatGateway implements OnGatewayInit {
       this.server.to(room).emit("receiveMessage", saved);
 
       // Also push to personal user rooms for real-time sidebar updates
-      if (dto.conversationId) {
-        const conv = await this.chatService.prisma.conversation.findUnique({
-          where: { id: dto.conversationId },
-          select: { userAId: true, userBId: true },
-        });
-        if (conv) {
-          this.server.to(`user:${conv.userAId}`).emit("receiveMessage", saved);
-          this.server.to(`user:${conv.userBId}`).emit("receiveMessage", saved);
-        }
+      // Use the conversation userIds already embedded in the saved message (no extra DB query)
+      if (dto.conversationId && saved.conversation) {
+        this.server.to(`user:${saved.conversation.userAId}`).emit("receiveMessage", saved);
+        this.server.to(`user:${saved.conversation.userBId}`).emit("receiveMessage", saved);
       } else if (dto.groupId) {
         const groupMembers = await this.chatService.prisma.groupMember.findMany({
           where: { groupId: dto.groupId },

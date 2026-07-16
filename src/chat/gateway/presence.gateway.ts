@@ -15,8 +15,7 @@ import { RedisService } from "../../cache/redis.service";
   namespace: "/",
 })
 export class PresenceGateway
-  implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit
-{
+  implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
   @WebSocketServer()
   server: Server;
 
@@ -24,10 +23,10 @@ export class PresenceGateway
     private readonly jwtService: JwtService,
     private readonly prisma: PrismaService,
     private readonly redisService: RedisService,
-  ) {}
+  ) { }
 
   afterInit() {
-    console.log("✅ PresenceGateway initialized.");
+    console.log(" PresenceGateway initialized.");
   }
 
   async handleConnection(client: Socket) {

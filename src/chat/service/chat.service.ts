@@ -490,27 +490,26 @@ export class ChatService {
       throw new BadRequestException("Message cannot belong to both conversation and group");
     }
 
-    // Verify membership & access permissions
+    // Lean membership check — only fetch the IDs we need, no joins
     if (conversationId) {
-      await this.getConversationById(conversationId, senderId);
-    } else if (groupId) {
-      await this.getGroupById(groupId, senderId);
-    }
-
-    // Spam protection check (prevent exact same message sent by same user within 2 seconds)
-    const recentMessage = await this.prisma.message.findFirst({
-      where: {
-        senderId,
-        content,
-        sentAt: { gte: new Date(Date.now() - 2000) },
-      },
-    });
-    if (recentMessage) {
-      throw new BadRequestException({
-        success: false,
-        code: "SPAM_PREVENTION",
-        message: "Duplicate message detected. Please wait a moment.",
+      const conv = await this.prisma.conversation.findUnique({
+        where: { id: conversationId },
+        select: { userAId: true, userBId: true, isDeletedA: true, isDeletedB: true },
       });
+      if (!conv) throw new NotFoundException({ code: "CONVERSATION_NOT_FOUND", message: "Conversation not found" });
+      const isUserA = conv.userAId === senderId;
+      if (conv.userAId !== senderId && conv.userBId !== senderId) {
+        throw new ForbiddenException({ code: "NOT_A_PARTICIPANT", message: "You are not a participant" });
+      }
+      if (isUserA ? conv.isDeletedA : conv.isDeletedB) {
+        throw new NotFoundException({ code: "CONVERSATION_DELETED", message: "Conversation has been deleted" });
+      }
+    } else if (groupId) {
+      const member = await this.prisma.groupMember.findUnique({
+        where: { groupId_userId: { groupId, userId: senderId } },
+        select: { groupId: true },
+      });
+      if (!member) throw new ForbiddenException({ code: "NOT_A_MEMBER", message: "You are not a member of this group" });
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -528,6 +527,10 @@ export class ChatService {
         },
         include: {
           sender: { select: { id: true, username: true, email: true, avatar: true } },
+          // Include conv userIds so the gateway can broadcast without a 2nd DB query
+          conversation: conversationId
+            ? { select: { userAId: true, userBId: true } }
+            : false,
         },
       });
 
