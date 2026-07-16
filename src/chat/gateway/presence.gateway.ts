@@ -36,6 +36,7 @@ export class PresenceGateway
         client.handshake.query?.token;
 
       if (!token) {
+        console.warn(`[WS-Presence] Connection rejected: Token missing for socket ${client.id}`);
         client.disconnect();
         return;
       }
@@ -47,8 +48,8 @@ export class PresenceGateway
       const userId = payload.userId || payload.sub;
       client.data.userId = userId;
 
-      // Join personal room
-      client.join(`user:${userId}`);
+      // Join personal room and await to ensure state is populated
+      await client.join(`user:${userId}`);
 
       let onlineCount = 1;
       try {
@@ -86,8 +87,9 @@ export class PresenceGateway
       if (onlineCount === 1) {
         this.server.emit("userOnline", { userId });
       }
-      console.log(`[WS-Presence] Connected: user ${userId} (${client.id})`);
+      console.log(`[WS-Presence] Connected: user ${userId} (${client.id}), total sessions: ${onlineCount}`);
     } catch (err) {
+      console.error(`[WS-Presence] Connection verification failed for socket ${client.id}:`, err);
       client.disconnect();
     }
   }
@@ -102,14 +104,14 @@ export class PresenceGateway
           await clientRedis.srem(`online_user:${userId}`, client.id);
           onlineCount = await clientRedis.scard(`online_user:${userId}`);
         } else {
+          // Socket.io has already removed this socket from the room on disconnect.
+          // Therefore, the size of localSockets is exactly the number of OTHER active sessions/tabs.
           const localSockets = (this.server as any).adapter.rooms.get(`user:${userId}`);
-          const localSize = localSockets ? localSockets.size : 1;
-          onlineCount = Math.max(0, localSize - 1);
+          onlineCount = localSockets ? localSockets.size : 0;
         }
       } catch (err) {
         const localSockets = (this.server as any).adapter.rooms.get(`user:${userId}`);
-        const localSize = localSockets ? localSockets.size : 1;
-        onlineCount = Math.max(0, localSize - 1);
+        onlineCount = localSockets ? localSockets.size : 0;
       }
 
       // If no active socket sessions remain, update DB and broadcast offline
