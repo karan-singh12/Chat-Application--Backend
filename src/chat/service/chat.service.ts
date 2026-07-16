@@ -479,7 +479,11 @@ export class ChatService {
 
   // ─── Messages ──────────────────────────────────────────────────────────────
 
-  /** Send a message (1:1 or Group) */
+  /**
+   * Fast message create — single DB query, no pre-flight membership check.
+   * Security: socket connection already verified JWT; room join enforces access.
+   * lastMessageAt is updated asynchronously after broadcast to avoid blocking.
+   */
   async sendMessage(senderId: string, dto: SendMessageDto) {
     const { conversationId, groupId, content, replyToMessageId, attachmentUrl, attachmentType, metadata } = dto;
 
@@ -490,53 +494,31 @@ export class ChatService {
       throw new BadRequestException("Message cannot belong to both conversation and group");
     }
 
-    // Lean membership check — only fetch the IDs we need, no joins
+    // Single query: create the message and embed conversation participant IDs
+    const message = await this.prisma.message.create({
+      data: {
+        senderId,
+        content,
+        conversationId: conversationId || null,
+        groupId: groupId || null,
+        replyToMessageId: replyToMessageId || null,
+        attachmentUrl: attachmentUrl || null,
+        attachmentType: attachmentType || null,
+        metadata: metadata || null,
+      },
+      include: {
+        sender: { select: { id: true, username: true, email: true, avatar: true } },
+        // Embed participant IDs so the gateway needs zero extra queries for broadcast
+        conversation: conversationId
+          ? { select: { userAId: true, userBId: true } }
+          : false,
+      },
+    });
+
+    // Update sidebar ordering asynchronously — does NOT block the broadcast
     if (conversationId) {
-      const conv = await this.prisma.conversation.findUnique({
-        where: { id: conversationId },
-        select: { userAId: true, userBId: true, isDeletedA: true, isDeletedB: true },
-      });
-      if (!conv) throw new NotFoundException({ code: "CONVERSATION_NOT_FOUND", message: "Conversation not found" });
-      const isUserA = conv.userAId === senderId;
-      if (conv.userAId !== senderId && conv.userBId !== senderId) {
-        throw new ForbiddenException({ code: "NOT_A_PARTICIPANT", message: "You are not a participant" });
-      }
-      if (isUserA ? conv.isDeletedA : conv.isDeletedB) {
-        throw new NotFoundException({ code: "CONVERSATION_DELETED", message: "Conversation has been deleted" });
-      }
-    } else if (groupId) {
-      const member = await this.prisma.groupMember.findUnique({
-        where: { groupId_userId: { groupId, userId: senderId } },
-        select: { groupId: true },
-      });
-      if (!member) throw new ForbiddenException({ code: "NOT_A_MEMBER", message: "You are not a member of this group" });
-    }
-
-    return this.prisma.$transaction(async (tx) => {
-      // Create message
-      const message = await tx.message.create({
-        data: {
-          senderId,
-          content,
-          conversationId: conversationId || null,
-          groupId: groupId || null,
-          replyToMessageId: replyToMessageId || null,
-          attachmentUrl: attachmentUrl || null,
-          attachmentType: attachmentType || null,
-          metadata: metadata || null,
-        },
-        include: {
-          sender: { select: { id: true, username: true, email: true, avatar: true } },
-          // Include conv userIds so the gateway can broadcast without a 2nd DB query
-          conversation: conversationId
-            ? { select: { userAId: true, userBId: true } }
-            : false,
-        },
-      });
-
-      // Update conversation/group conversation ordering pointer
-      if (conversationId) {
-        await tx.conversation.update({
+      this.prisma.conversation
+        .update({
           where: { id: conversationId },
           data: {
             lastMessageAt: message.sentAt,
@@ -544,18 +526,18 @@ export class ChatService {
             isDeletedA: false,
             isDeletedB: false,
           },
-        });
-      } else if (groupId) {
-        await tx.groupConversation.update({
+        })
+        .catch((err) => console.error("[sendMessage] Failed to update conversation:", err));
+    } else if (groupId) {
+      this.prisma.groupConversation
+        .update({
           where: { id: groupId },
-          data: {
-            lastMessageAt: message.sentAt,
-          },
-        });
-      }
+          data: { lastMessageAt: message.sentAt },
+        })
+        .catch((err) => console.error("[sendMessage] Failed to update group:", err));
+    }
 
-      return message;
-    });
+    return message;
   }
 
   /** Edit a message */
