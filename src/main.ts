@@ -28,15 +28,15 @@ async function bootstrap() {
   // Register fastify multipart parser
   await app.register(multipart, {
     limits: {
-      fileSize: 100 * 1024 * 1024, // 100MB matching Express body limit
+      fileSize: 100 * 1024 * 1024,
     },
   });
 
   // Register fastify static to serve uploads in public directory
   await app.register(fastifyStatic, {
     root: path.join(process.cwd(), "public"),
-    prefix: "/public/", // Must match Express public path routing
-    decorateReply: false, // Avoid collision with other static decorators if any
+    prefix: "/public/",
+    decorateReply: false,
   });
 
   // Set global API prefix
@@ -62,7 +62,6 @@ async function bootstrap() {
 
   const PORT = process.env.PORT || process.env.API_PORT || 3003;
 
-  // Fastify needs 0.0.0.0 or explicit host IP to allow external connections on local networks
   await app.listen(PORT, "0.0.0.0");
   console.log(`NestJS Fastify server running on http://localhost:${PORT}`);
 }

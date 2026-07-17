@@ -98,17 +98,14 @@ import { ScheduleModule } from "@nestjs/schedule";
     PaymentsModule,
     JobsModule,
     PostsModule,
-    // CacheModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
-    // Global HTTP rate-limit guard (proxy-aware, reads x-forwarded-for)
     {
       provide: APP_GUARD,
       useClass: ThrottlerBehindProxyGuard,
     },
-    // Global request/traffic logging interceptor
     {
       provide: APP_INTERCEPTOR,
       useClass: TrafficMonitorInterceptor,
