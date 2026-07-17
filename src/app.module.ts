@@ -19,60 +19,69 @@ import { TrafficMonitorInterceptor } from "./common/interceptors/traffic-monitor
 import { ThrottlerBehindProxyGuard } from "./common/guards/throttler-behind-proxy.guard";
 import { PostsModule } from "./modules/posts/posts.module";
 import { ScheduleModule } from "@nestjs/schedule";
-// import { CacheModule } from "./cache/cache.module";
 
-/** Build the throttler storage: Redis when available, in-memory as fallback */
-function buildThrottlerStorage() {
-  const host = process.env.REDIS_HOST || "127.0.0.1";
-  const port = parseInt(process.env.REDIS_PORT ?? "6379", 10);
 
-  try {
-    const client = new Redis({
-      host,
-      port,
-      connectTimeout: 1500,
-      maxRetriesPerRequest: 0,
-      lazyConnect: true,
-    });
-    // Silence connection errors so a missing Redis doesn't crash the app
-    client.on("error", () => {});
-    return new ThrottlerStorageRedisService(client);
-  } catch {
-    // Redis unavailable — ThrottlerModule will use its built-in in-memory store
-    return undefined;
-  }
-}
 
 @Module({
   imports: [
-    // ─── Rate Limiting ───────────────────────────────────────────────────────
-    // Three named throttler tiers applied globally via ThrottlerBehindProxyGuard.
-    // Use @Throttle({ auth: {} }) / @Throttle({ upload: {} }) on specific routes,
-    // or @SkipThrottle() to opt out entirely.
-    ThrottlerModule.forRoot({
-      throttlers: [
-        {
-          // default — general API calls
-          name: "default",
-          ttl: 60_000,   // 1 minute window (ms)
-          limit: 100,    // 100 requests / min per IP
-        },
-        {
-          // auth — strict limit for login/signup/password endpoints
-          name: "auth",
-          ttl: 60_000,   // 1 minute window
-          limit: 10,     // 10 attempts / min per IP
-        },
-        {
-          // upload — generous window for media uploads
-          name: "upload",
-          ttl: 60_000,
-          limit: 20,     // 20 uploads / min per IP
-        },
-      ],
-      // Use Redis store (shared across instances); falls back to in-memory if Redis is offline
-      storage: buildThrottlerStorage(),
+    ThrottlerModule.forRootAsync({
+      useFactory: async () => {
+        const host = process.env.REDIS_HOST || "127.0.0.1";
+        const port = parseInt(process.env.REDIS_PORT ?? "6379", 10);
+
+        let storage: any = undefined;
+
+        // Verify connection with a quick ping
+        const checkClient = new Redis({
+          host,
+          port,
+          connectTimeout: 1000,
+          maxRetriesPerRequest: 0,
+        });
+        checkClient.on("error", () => { });
+
+        try {
+          await checkClient.ping();
+
+          // Redis is online! Create a real client
+          const client = new Redis({
+            host,
+            port,
+            retryStrategy(times) {
+              return Math.min(times * 100, 3000); // retry delay
+            },
+          });
+          client.on("error", () => { });
+          storage = new ThrottlerStorageRedisService(client);
+        } catch {
+          // Redis offline: fall back to built-in in-memory store
+        } finally {
+          checkClient.disconnect();
+        }
+
+        return {
+          throttlers: [
+            {
+              name: "default",
+              ttl: 60_000,
+              limit: 100,
+            },
+            {
+              name: "auth",
+              ttl: 60_000,
+              limit: 10,
+            },
+            {
+              name: "upload",
+              ttl: 60_000,
+              limit: 20,
+            },
+          ],
+          storage,
+        };
+      },
     }),
+
 
     // ─── Task Scheduling ─────────────────────────────────────────────────────
     ScheduleModule.forRoot(),
@@ -106,5 +115,5 @@ function buildThrottlerStorage() {
     },
   ],
 })
-export class AppModule {}
+export class AppModule { }
 
