@@ -2,6 +2,7 @@ import * as dotenv from "dotenv";
 dotenv.config();
 
 import { NestFactory } from "@nestjs/core";
+import { ValidationPipe } from "@nestjs/common";
 import { FastifyAdapter, NestFastifyApplication } from "@nestjs/platform-fastify";
 import { AppModule } from "./app.module";
 import { TransformInterceptor } from "./common/interceptors/transform.interceptor";
@@ -48,9 +49,16 @@ async function bootstrap() {
     allowedHeaders: "Content-Type, Accept, Authorization",
   });
 
-  // Register global interceptor and exception filter
+  // Register global interceptor, exception filter, and validation pipe
   app.useGlobalInterceptors(new TransformInterceptor());
   app.useGlobalFilters(new HttpExceptionFilter());
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      forbidNonWhitelisted: true,
+    })
+  );
 
   const PORT = process.env.PORT || process.env.API_PORT || 3003;
 

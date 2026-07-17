@@ -11,6 +11,7 @@ import { UseGuards } from "@nestjs/common";
 import { WsJwtGuard } from "../guards/ws-jwt.guard";
 import { ChatService } from "../service/chat.service";
 import { SendMessageDto, TypingDto, ReadReceiptDto } from "../dto";
+import { RedisService } from "../../cache/redis.service";
 
 @WebSocketGateway({
   cors: { origin: "*" },
@@ -24,10 +25,13 @@ export class ChatGateway implements OnGatewayInit {
   // Track active typing timeouts: "roomId:userId" -> Timeout
   private typingTimeouts = new Map<string, NodeJS.Timeout>();
 
-  // In-memory rate limiting map: "userId" -> { count, windowStart }
-  private rateLimits = new Map<string, { count: number; windowStart: number }>();
+  // Fallback in-memory rate limiting map (used when Redis is offline)
+  private localRateLimits = new Map<string, { count: number; windowStart: number }>();
 
-  constructor(private readonly chatService: ChatService) {}
+  constructor(
+    private readonly chatService: ChatService,
+    private readonly redisService: RedisService,
+  ) {}
 
   afterInit() {
     console.log("✅ ChatGateway initialized.");
@@ -88,8 +92,8 @@ export class ChatGateway implements OnGatewayInit {
   ) {
     const userId = client.data.userId;
 
-    // Rate Limiting (20 messages / 10 seconds)
-    if (this.isRateLimited(userId, 20, 10000)) {
+    // Rate Limiting (20 messages / 10 seconds) — shared via Redis, local fallback
+    if (await this.isRateLimited(userId, 20, 10000)) {
       client.emit("error", {
         success: false,
         code: "RATE_LIMIT_EXCEEDED",
@@ -97,6 +101,7 @@ export class ChatGateway implements OnGatewayInit {
       });
       return;
     }
+
 
     try {
       const saved = await this.chatService.sendMessage(userId, dto);
@@ -346,14 +351,40 @@ export class ChatGateway implements OnGatewayInit {
     this.server.to(`user:${data.targetUserId}`).emit("acceptFriendRequest", data.request);
   }
 
-  // ─── Rate Limiter Helper ───
+  // ─── Rate Limiter Helper ──────────────────────────────────────────────────
+  // Uses Redis INCR/EXPIRE for a shared sliding-window counter across all
+  // server instances. Falls back to the local in-memory Map if Redis is offline.
 
-  private isRateLimited(userId: string, maxRequests: number, timeWindowMs: number): boolean {
+  private async isRateLimited(
+    userId: string,
+    maxRequests: number,
+    timeWindowMs: number,
+  ): Promise<boolean> {
+    const windowSec = Math.ceil(timeWindowMs / 1000);
+    const key = `ws_rate:${userId}`;
+
+    try {
+      const redisClient = this.redisService.getClient();
+
+      if (redisClient.status === "ready") {
+        // Atomic increment — returns new count
+        const count = await redisClient.incr(key);
+        if (count === 1) {
+          // First request in this window — set the TTL
+          await redisClient.expire(key, windowSec);
+        }
+        return count > maxRequests;
+      }
+    } catch {
+      // Redis error: fall through to local fallback
+    }
+
+    // ── Local in-memory fallback ──────────────────────────────────────────
     const now = Date.now();
-    const limitInfo = this.rateLimits.get(userId);
+    const limitInfo = this.localRateLimits.get(userId);
 
     if (!limitInfo) {
-      this.rateLimits.set(userId, { count: 1, windowStart: now });
+      this.localRateLimits.set(userId, { count: 1, windowStart: now });
       return false;
     }
 
@@ -367,3 +398,4 @@ export class ChatGateway implements OnGatewayInit {
     return limitInfo.count > maxRequests;
   }
 }
+

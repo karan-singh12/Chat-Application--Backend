@@ -6,9 +6,10 @@ import {
   OnGatewayInit,
 } from "@nestjs/websockets";
 import { Server, Socket } from "socket.io";
-import { JwtService } from "@nestjs/jwt";
 import { PrismaService } from "../../prisma/prisma.service";
 import { RedisService } from "../../cache/redis.service";
+import { JwtStrategy } from "../../auth/strategies/jwt.strategy";
+import { AppLogger } from "../../shared/logger/logger.service";
 
 @WebSocketGateway({
   cors: { origin: "*" },
@@ -19,14 +20,16 @@ export class PresenceGateway
   @WebSocketServer()
   server: Server;
 
+  private readonly logger = new AppLogger();
+
   constructor(
-    private readonly jwtService: JwtService,
+    private readonly jwtStrategy: JwtStrategy,
     private readonly prisma: PrismaService,
     private readonly redisService: RedisService,
   ) { }
 
   afterInit() {
-    console.log(" PresenceGateway initialized.");
+    this.logger.info("PresenceGateway", "PresenceGateway initialized.");
   }
 
   async handleConnection(client: Socket) {
@@ -36,16 +39,14 @@ export class PresenceGateway
         client.handshake.query?.token;
 
       if (!token) {
-        console.warn(`[WS-Presence] Connection rejected: Token missing for socket ${client.id}`);
+        this.logger.warn("PresenceGateway", `Connection rejected: Token missing for socket ${client.id}`);
         client.disconnect();
         return;
       }
 
-      const payload = await this.jwtService.verifyAsync(token, {
-        secret: process.env.JWT_SECRET || "super-secret-key-12345",
-      });
+      const payload = await this.jwtStrategy.verify(token);
 
-      const userId = payload.userId || payload.sub;
+      const userId = payload.userId;
       client.data.userId = userId;
 
       // Join personal room and await to ensure state is populated
@@ -87,9 +88,9 @@ export class PresenceGateway
       if (onlineCount === 1) {
         this.server.emit("userOnline", { userId });
       }
-      console.log(`[WS-Presence] Connected: user ${userId} (${client.id}), total sessions: ${onlineCount}`);
+      this.logger.info("PresenceGateway", `Connected: user ${userId} (${client.id}), total sessions: ${onlineCount}`);
     } catch (err) {
-      console.error(`[WS-Presence] Connection verification failed for socket ${client.id}:`, err);
+      this.logger.error("PresenceGateway", `Connection verification failed for socket ${client.id}:`, err);
       client.disconnect();
     }
   }
@@ -126,10 +127,11 @@ export class PresenceGateway
         });
 
         this.server.emit("userOffline", { userId });
-        console.log(`[WS-Presence] Disconnected last session: user ${userId}`);
+        this.logger.info("PresenceGateway", `Disconnected last session: user ${userId}`);
       } else {
-        console.log(`[WS-Presence] Disconnected session: user ${userId} (remaining tabs: ${onlineCount})`);
+        this.logger.info("PresenceGateway", `Disconnected session: user ${userId} (remaining tabs: ${onlineCount})`);
       }
     }
   }
 }
+

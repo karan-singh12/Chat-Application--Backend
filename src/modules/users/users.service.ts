@@ -1,10 +1,17 @@
-import { Injectable, NotFoundException, BadRequestException } from "@nestjs/common";
-import { PrismaService } from "../../prisma/prisma.service";
-import { FriendshipStatus } from "@prisma/client";
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
+import { FriendshipStatus } from '@prisma/client';
+import { MESSAGES } from '../../common/constants/messages.constant';
+import { APP_CONSTANTS } from '../../common/constants/app.constant';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
+
 
   async getProfile(userId: string) {
     const user = await this.prisma.user.findUnique({
@@ -12,7 +19,7 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new NotFoundException("User profile not found");
+      throw new NotFoundException(MESSAGES.user.profileNotFound);
     }
 
     const { password, ...result } = user;
@@ -36,7 +43,7 @@ export class UsersService {
     }
 
     if (!user) {
-      throw new NotFoundException("User profile not found");
+      throw new NotFoundException(MESSAGES.user.profileNotFound);
     }
 
     const { password, ...result } = user;
@@ -52,7 +59,7 @@ export class UsersService {
         where: { username: updateData.username },
       });
       if (existingUser && existingUser.id !== userId) {
-        throw new BadRequestException("Username is already taken");
+        throw new BadRequestException(MESSAGES.user.usernameTaken);
       }
     }
 
@@ -81,12 +88,18 @@ export class UsersService {
     });
 
     if (!targetUser) {
-      throw new NotFoundException("User not found");
+      throw new NotFoundException(MESSAGES.user.notFound);
     }
 
     if (targetUser.id === senderId) {
-      throw new BadRequestException("You cannot add yourself as a friend");
+      throw new BadRequestException(MESSAGES.user.cannotAddSelf);
     }
+
+    // Find sender info to send in notification payload
+    const sender = await this.prisma.user.findUnique({
+      where: { id: senderId },
+      select: { id: true, email: true, username: true, avatar: true },
+    });
 
     // Check if friendship relationship already exists in either direction
     const existingFriendship = await this.prisma.friendship.findFirst({
@@ -100,16 +113,25 @@ export class UsersService {
 
     if (existingFriendship) {
       if (existingFriendship.status === FriendshipStatus.ACCEPTED) {
-        throw new BadRequestException("You are already friends with this user");
+        throw new BadRequestException(MESSAGES.friendship.alreadyFriends);
       } else if (existingFriendship.status === FriendshipStatus.PENDING) {
         if (existingFriendship.senderId === senderId) {
-          throw new BadRequestException("Friend request already sent");
+          throw new BadRequestException(MESSAGES.friendship.pendingRequest);
         } else {
           // If the other user already sent a request, accept it automatically!
           const updated = await this.prisma.friendship.update({
             where: { id: existingFriendship.id },
             data: { status: FriendshipStatus.ACCEPTED },
           });
+
+          // Dispatch notification that request was accepted
+          if (sender) {
+            await this.notificationsService.sendFriendAcceptedNotification(targetUser.id, {
+              friendship: updated,
+              friend: sender,
+            });
+          }
+
           const { password, ...result } = targetUser;
           return { friendship: updated, friend: result, accepted: true };
         }
@@ -119,6 +141,15 @@ export class UsersService {
           where: { id: existingFriendship.id },
           data: { senderId: senderId, receiverId: targetUser.id, status: FriendshipStatus.PENDING },
         });
+
+        // Dispatch notification of new pending request
+        if (sender) {
+          await this.notificationsService.sendFriendRequestNotification(targetUser.id, {
+            friendship: updated,
+            sender,
+          });
+        }
+
         const { password, ...result } = targetUser;
         return { friendship: updated, friend: result, accepted: false };
       }
@@ -132,6 +163,14 @@ export class UsersService {
         status: FriendshipStatus.PENDING,
       },
     });
+
+    // Dispatch notification of new pending request
+    if (sender) {
+      await this.notificationsService.sendFriendRequestNotification(targetUser.id, {
+        friendship: newFriendship,
+        sender,
+      });
+    }
 
     const { password, ...result } = targetUser;
     return { friendship: newFriendship, friend: result, accepted: false };
@@ -187,22 +226,38 @@ export class UsersService {
     });
 
     if (!friendship) {
-      throw new NotFoundException("Friend request not found");
+      throw new NotFoundException(MESSAGES.friendship.notFound);
     }
 
     // Only the receiver can accept or decline a pending request
     if (friendship.receiverId !== userId) {
-      throw new BadRequestException("You can only respond to requests sent to you");
+      throw new BadRequestException(MESSAGES.friendship.notReceiver);
     }
 
     if (friendship.status !== FriendshipStatus.PENDING) {
-      throw new BadRequestException("This request has already been handled");
+      throw new BadRequestException(MESSAGES.friendship.alreadyHandled);
     }
 
     const updatedFriendship = await this.prisma.friendship.update({
       where: { id: friendshipId },
       data: { status },
     });
+
+    if (status === FriendshipStatus.ACCEPTED) {
+      // Find receiver info to send in notification
+      const receiver = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, email: true, username: true, avatar: true },
+      });
+
+      if (receiver) {
+        // Notify original sender that their request was accepted
+        await this.notificationsService.sendFriendAcceptedNotification(friendship.senderId, {
+          friendship: updatedFriendship,
+          friend: receiver,
+        });
+      }
+    }
 
     return updatedFriendship;
   }
@@ -267,7 +322,7 @@ export class UsersService {
     });
 
     if (!friendship) {
-      throw new NotFoundException("Friend relationship not found");
+      throw new NotFoundException(MESSAGES.friendship.friendNotFound);
     }
 
     await this.prisma.friendship.delete({
@@ -313,7 +368,7 @@ export class UsersService {
         avatar: true,
         bio: true,
       },
-      take: 10, // Limit suggestions
+      take: APP_CONSTANTS.friends.suggestionsLimit,
     });
 
     return suggestions.map((sug) => ({

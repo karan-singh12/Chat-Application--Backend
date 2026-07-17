@@ -1,9 +1,10 @@
 import { Injectable, BadRequestException } from "@nestjs/common";
-import * as path from "path";
-import * as fs from "fs";
+import { LocalStorageProvider } from "../../shared/storage/local-storage.provider";
 
 @Injectable()
 export class UploadsService {
+  constructor(private readonly localStorage: LocalStorageProvider) {}
+
   async handleMultipart(req: any): Promise<void> {
     if (typeof req.isMultipart !== "function" || !req.isMultipart()) {
       return;
@@ -32,36 +33,26 @@ export class UploadsService {
     }
 
     const imagePath = body.imagePath || "general";
-    const allowedTypes = ["png", "jpg", "jpeg"];
 
     for (const tempFile of tempFiles) {
-      const ext = path.extname(tempFile.part.filename).toLowerCase().replace(".", "");
-      
-      if (["user", "streamer", "billboard"].includes(imagePath)) {
-        if (!allowedTypes.includes(ext)) {
-          throw new BadRequestException("Only png, jpg, jpeg allowed.");
-        }
-      }
-
-      const uploadDir = path.join(process.cwd(), "public", imagePath);
-      if (!fs.existsSync(uploadDir)) {
-        fs.mkdirSync(uploadDir, { recursive: true });
-      }
-
-      const filename = `${Date.now()}-${tempFile.part.filename}`;
-      const savePath = path.join(uploadDir, filename);
-
-      fs.writeFileSync(savePath, tempFile.buffer);
+      const result = await this.localStorage.save({
+        buffer: tempFile.buffer,
+        filename: tempFile.part.filename,
+        imagePath,
+        fieldname: tempFile.part.fieldname,
+        mimetype: tempFile.part.mimetype,
+        encoding: tempFile.part.encoding,
+      });
 
       fileInfo = {
-        fieldname: tempFile.part.fieldname,
-        originalname: tempFile.part.filename,
-        encoding: tempFile.part.encoding,
-        mimetype: tempFile.part.mimetype,
-        destination: `public/${imagePath}`,
-        filename: filename,
-        path: `public/${imagePath}/${filename}`,
-        size: tempFile.buffer.length,
+        fieldname: result.fieldname,
+        originalname: result.originalname,
+        encoding: result.encoding,
+        mimetype: result.mimetype,
+        destination: result.destination,
+        filename: result.filename,
+        path: result.path,
+        size: result.size,
       };
     }
 
@@ -70,3 +61,4 @@ export class UploadsService {
     req.file = fileInfo;
   }
 }
+

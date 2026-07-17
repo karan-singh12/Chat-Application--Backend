@@ -6,42 +6,42 @@ import {
   Body,
   UseGuards,
   Req,
-} from "@nestjs/common";
-import { CallsService } from "../service/calls.service";
-import { AuthGuard } from "../../common/guards/auth.guard";
-import { ApiTags, ApiOperation, ApiBearerAuth } from "@nestjs/swagger";
+} from '@nestjs/common';
+import { CallsService } from '../service/calls.service';
+import { AuthGuard } from '../../common/guards/auth.guard';
+import { MESSAGES } from '../../common/constants/messages.constant';
+import { CreateCallLogDto } from '../dto/create-call-log.dto';
+import { AuthenticatedUser } from '../../common/interfaces/jwt-payload.interface';
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 
-@ApiTags("Calls")
+@ApiTags('Calls')
 @ApiBearerAuth()
-@Controller("calls")
+@Controller('calls')
 @UseGuards(AuthGuard)
 export class CallsController {
   constructor(private readonly callsService: CallsService) {}
 
   @Post()
-  @ApiOperation({ summary: "Create a call log entry" })
-  async createCallLog(
-    @Req() req: any,
-    @Body() body: { receiverId: string; status: string; video: boolean; duration: number }
-  ) {
-    const userId = req.user.userId;
-    const callLog = await this.callsService.createCallLog(userId, body);
-    return { success: true, data: callLog };
+  @ApiOperation({ summary: 'Create a call log entry' })
+  async createCallLog(@Req() req: any, @Body() dto: CreateCallLogDto) {
+    const userId  = (req.user as AuthenticatedUser).userId;
+    const callLog = await this.callsService.createCallLog(userId, dto);
+    return { message: MESSAGES.calls.logCreated, data: callLog };
   }
 
   @Get()
-  @ApiOperation({ summary: "Get call history logs for the current user" })
+  @ApiOperation({ summary: 'Get call history logs for the current user' })
   async getCallHistory(@Req() req: any) {
-    const userId = req.user.userId;
+    const userId      = (req.user as AuthenticatedUser).userId;
     const callHistory = await this.callsService.getCallHistory(userId);
-    return { success: true, data: callHistory };
+    return { message: MESSAGES.calls.historyFetched, data: callHistory };
   }
 
   @Delete()
-  @ApiOperation({ summary: "Clear call history for the current user" })
+  @ApiOperation({ summary: 'Clear call history for the current user' })
   async clearCallHistory(@Req() req: any) {
-    const userId = req.user.userId;
+    const userId = (req.user as AuthenticatedUser).userId;
     await this.callsService.clearCallHistory(userId);
-    return { success: true, message: "Call history cleared successfully" };
+    return { message: MESSAGES.calls.historyCleared };
   }
 }

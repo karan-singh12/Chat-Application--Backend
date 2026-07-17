@@ -1,33 +1,36 @@
-import { CanActivate, ExecutionContext, Injectable } from "@nestjs/common";
-import { JwtService } from "@nestjs/jwt";
-import { WsException } from "@nestjs/websockets";
-import { Socket } from "socket.io";
+import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
+import { WsException } from '@nestjs/websockets';
+import { Socket } from 'socket.io';
+import { JwtStrategy } from '../../auth/strategies/jwt.strategy';
+import { MESSAGES } from '../../common/constants/messages.constant';
 
+/**
+ * WebSocket JWT Guard.
+ * Uses the shared JwtStrategy to verify the socket handshake token.
+ * Attaches the typed JwtPayload to client.data.
+ */
 @Injectable()
 export class WsJwtGuard implements CanActivate {
-  constructor(private readonly jwtService: JwtService) {}
+  constructor(private readonly jwtStrategy: JwtStrategy) { }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    try {
-      const client: Socket = context.switchToWs().getClient();
-      const token =
-        client.handshake.auth?.token ||
-        client.handshake.query?.token;
+    const client: Socket = context.switchToWs().getClient();
+    const token =
+      client.handshake.auth?.token ||
+      client.handshake.query?.token;
 
-      if (!token) {
-        throw new WsException("Unauthorized: Token missing");
-      }
-
-      const payload = await this.jwtService.verifyAsync(token, {
-        secret: process.env.JWT_SECRET || "super-secret-key-12345",
-      });
-
-      // Attach user details to socket data
-      client.data.userId = payload.userId || payload.sub;
-      client.data.user = payload;
-      return true;
-    } catch (err) {
-      throw new WsException("Unauthorized: Token invalid or expired");
+    if (!token) {
+      throw new WsException(MESSAGES.auth.wsTokenMissing);
     }
+
+    const payload = await this.jwtStrategy.verifyWs(token as string);
+    if (!payload) {
+      throw new WsException(MESSAGES.auth.wsTokenInvalid);
+    }
+
+    // Attach typed payload to socket data
+    client.data.userId = payload.userId;
+    client.data.user = payload;
+    return true;
   }
 }
