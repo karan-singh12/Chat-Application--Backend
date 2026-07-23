@@ -21,7 +21,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     try {
       await this.$connect();
       console.log("Prisma successfully connected to PostgreSQL database.");
-    } catch (err) {
+    } catch (err: any) {
       console.warn("Prisma connection warning: Database server might be offline.", err.message);
     }
   }

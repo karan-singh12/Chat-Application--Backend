@@ -9,14 +9,9 @@ export class BackgroundJobsService {
 
   constructor(
     @InjectQueue("background-jobs") private readonly backgroundQueue: Queue
-  ) {}
+  ) { }
 
-  /**
-   * Add a job to the background tasks queue
-   * @param name The name of the job (e.g., 'send-email', 'cleanup')
-   * @param data The payload data for the job
-   * @param opts Optional BullMQ job options (e.g. delay, priority)
-   */
+
   async addJob(name: string, data: any, opts?: any) {
     try {
       const job = await this.backgroundQueue.add(name, data, {
@@ -42,9 +37,6 @@ export class BackgroundJobsService {
     }
   }
 
-  /**
-   * Get the underlying BullMQ Queue instance
-   */
   getQueue(): Queue {
     return this.backgroundQueue;
   }

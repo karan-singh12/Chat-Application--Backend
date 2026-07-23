@@ -1,11 +1,7 @@
 import { Controller, Post, Body } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 import { AuthService } from "./auth.service";
-import { SignupDto } from "./dto/signup.dto";
-import { LoginDto } from "./dto/login.dto";
 
-// Apply the strict "auth" throttle tier: 10 requests / minute per IP
-// This overrides the global "default" tier for this entire controller
 @Throttle({ auth: {} })
 @Controller("user/auth")
 export class AuthController {

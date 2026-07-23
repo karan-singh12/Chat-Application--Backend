@@ -5,6 +5,7 @@ import {
   MessageBody,
   ConnectedSocket,
   OnGatewayInit,
+  OnGatewayDisconnect,
 } from "@nestjs/websockets";
 import { Server, Socket } from "socket.io";
 import { UseGuards } from "@nestjs/common";
@@ -18,7 +19,7 @@ import { RedisService } from "../../cache/redis.service";
   namespace: "/",
 })
 @UseGuards(WsJwtGuard)
-export class ChatGateway implements OnGatewayInit {
+export class ChatGateway implements OnGatewayInit, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
@@ -28,6 +29,17 @@ export class ChatGateway implements OnGatewayInit {
   // Fallback in-memory rate limiting map (used when Redis is offline)
   private localRateLimits = new Map<string, { count: number; windowStart: number }>();
 
+  // Track active live streams: "broadcasterId" -> Stream details
+  private activeStreams = new Map<string, {
+    broadcasterId: string;
+    socketId: string;
+    username: string;
+    avatar: string | null;
+    title: string;
+    startedAt: string;
+    viewers: string[];
+  }>();
+
   constructor(
     private readonly chatService: ChatService,
     private readonly redisService: RedisService,
@@ -35,6 +47,32 @@ export class ChatGateway implements OnGatewayInit {
 
   afterInit() {
     console.log("✅ ChatGateway initialized.");
+  }
+
+  handleDisconnect(client: Socket) {
+    const userId = client.data?.userId;
+    if (!userId) return;
+
+    // Check if the user is a broadcaster
+    const stream = this.activeStreams.get(userId);
+    if (stream && stream.socketId === client.id) {
+      this.activeStreams.delete(userId);
+      this.server.to(`live:${userId}`).emit("liveStreamEnded", { broadcasterId: userId });
+      this.server.emit("liveStreamStopped", { broadcasterId: userId });
+      console.log(`[WS-Live] Stream by broadcaster ${userId} automatically ended due to disconnect.`);
+    }
+
+    // Check if the user is a viewer in any stream
+    for (const [broadcasterId, activeStream] of this.activeStreams.entries()) {
+      if (activeStream.viewers.includes(userId)) {
+        activeStream.viewers = activeStream.viewers.filter((id) => id !== userId);
+        this.server.to(`user:${broadcasterId}`).emit("liveViewerLeft", { viewerId: userId });
+        this.server.to(`live:${broadcasterId}`).emit("liveViewerCount", {
+          broadcasterId,
+          count: activeStream.viewers.length,
+        });
+      }
+    }
   }
 
   // ─── Room Management ────────────────────────────────────────────────────────
@@ -349,6 +387,148 @@ export class ChatGateway implements OnGatewayInit {
     @MessageBody() data: { targetUserId: string; request: any }
   ) {
     this.server.to(`user:${data.targetUserId}`).emit("acceptFriendRequest", data.request);
+  }
+
+  // ─── Live Streaming Broadcast & Signaling ───────────────────────────────────
+
+  @SubscribeMessage("goLive")
+  async handleGoLive(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { title?: string }
+  ) {
+    const userId = client.data.userId;
+    try {
+      const user = await this.chatService.prisma.user.findUnique({
+        where: { id: userId },
+        select: { username: true, avatar: true },
+      });
+
+      const title = data.title?.trim() || `${user?.username || "User"}'s Live Stream`;
+      const stream = {
+        broadcasterId: userId,
+        socketId: client.id,
+        username: user?.username || "Broadcaster",
+        avatar: user?.avatar || null,
+        title,
+        startedAt: new Date().toISOString(),
+        viewers: [],
+      };
+
+      this.activeStreams.set(userId, stream);
+      client.join(`live:${userId}`);
+
+      // Broadcast globally that a stream has started
+      this.server.emit("liveStreamStarted", stream);
+      client.emit("goLiveSuccess", stream);
+      console.log(`[WS-Live] User ${userId} is now LIVE: "${title}"`);
+    } catch (err) {
+      client.emit("error", { success: false, message: "Failed to go live" });
+    }
+  }
+
+  @SubscribeMessage("stopLiveStream")
+  handleStopLiveStream(@ConnectedSocket() client: Socket) {
+    const userId = client.data.userId;
+    const stream = this.activeStreams.get(userId);
+    if (stream) {
+      this.activeStreams.delete(userId);
+      this.server.to(`live:${userId}`).emit("liveStreamEnded", { broadcasterId: userId });
+      this.server.emit("liveStreamStopped", { broadcasterId: userId });
+      console.log(`[WS-Live] Stream by broadcaster ${userId} stopped.`);
+    }
+  }
+
+  @SubscribeMessage("getActiveStreams")
+  handleGetActiveStreams(@ConnectedSocket() client: Socket) {
+    client.emit("activeStreamsList", Array.from(this.activeStreams.values()));
+  }
+
+  @SubscribeMessage("joinLiveStream")
+  async handleJoinLiveStream(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { broadcasterId: string }
+  ) {
+    const userId = client.data.userId;
+    const stream = this.activeStreams.get(data.broadcasterId);
+    if (!stream) {
+      client.emit("error", { message: "Stream not found or already ended" });
+      return;
+    }
+
+    client.join(`live:${data.broadcasterId}`);
+    if (!stream.viewers.includes(userId)) {
+      stream.viewers.push(userId);
+    }
+
+    const viewer = await this.chatService.prisma.user.findUnique({
+      where: { id: userId },
+      select: { username: true, avatar: true },
+    });
+
+    this.server.to(`user:${data.broadcasterId}`).emit("liveViewerJoined", {
+      viewerId: userId,
+      username: viewer?.username || "Viewer",
+      avatar: viewer?.avatar || null,
+    });
+
+    this.server.to(`live:${data.broadcasterId}`).emit("liveViewerCount", {
+      broadcasterId: data.broadcasterId,
+      count: stream.viewers.length,
+    });
+  }
+
+  @SubscribeMessage("leaveLiveStream")
+  handleLeaveLiveStream(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { broadcasterId: string }
+  ) {
+    const userId = client.data.userId;
+    client.leave(`live:${data.broadcasterId}`);
+
+    const stream = this.activeStreams.get(data.broadcasterId);
+    if (stream) {
+      stream.viewers = stream.viewers.filter((id) => id !== userId);
+      this.server.to(`user:${data.broadcasterId}`).emit("liveViewerLeft", { viewerId: userId });
+      this.server.to(`live:${data.broadcasterId}`).emit("liveViewerCount", {
+        broadcasterId: data.broadcasterId,
+        count: stream.viewers.length,
+      });
+    }
+  }
+
+  @SubscribeMessage("liveOffer")
+  handleLiveOffer(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { targetUserId: string; offer: any }
+  ) {
+    const fromBroadcasterId = client.data.userId;
+    this.server.to(`user:${data.targetUserId}`).emit("liveOffer", {
+      fromBroadcasterId,
+      offer: data.offer,
+    });
+  }
+
+  @SubscribeMessage("liveAnswer")
+  handleLiveAnswer(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { targetUserId: string; answer: any }
+  ) {
+    const fromViewerId = client.data.userId;
+    this.server.to(`user:${data.targetUserId}`).emit("liveAnswer", {
+      fromViewerId,
+      answer: data.answer,
+    });
+  }
+
+  @SubscribeMessage("liveIceCandidate")
+  handleLiveIceCandidate(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { targetUserId: string; candidate: any }
+  ) {
+    this.server.to(`user:${data.targetUserId}`).emit("liveIceCandidate", {
+      candidate: data.candidate,
+      fromUserId: client.data.userId,
+    });
   }
 
   // ─── Rate Limiter Helper ──────────────────────────────────────────────────

@@ -37,7 +37,7 @@ export class RedisIoAdapter extends IoAdapter {
       console.log(`[WS] Horizontal cluster: Socket.IO connected to Redis on ${host}:${port}`);
       return true;
     } catch (err) {
-      console.warn(`[WS] Redis offline: falling back to single-instance in-memory adapter.`, err.message);
+      console.warn(`[WS] Redis offline: falling back to single-instance in-memory adapter.`, err instanceof Error ? err.message : String(err));
       return false;
     } finally {
       checkClient.disconnect();

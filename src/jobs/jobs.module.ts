@@ -5,10 +5,6 @@ import { BackgroundJobsProcessor } from "./processors/background-jobs.processor"
 import { BackgroundJobsService } from "./queues/background-jobs.service";
 import { PrismaModule } from "../prisma/prisma.module";
 
-/**
- * Parses the Redis URL or environment variables to construct compatible
- * ConnectionOptions for BullMQ. Handles SSL/TLS for Upstash or Render.
- */
 function getRedisConnectionOptions() {
   const redisUrlStr = process.env.REDIS_URL;
   if (redisUrlStr) {
@@ -39,7 +35,6 @@ function getRedisConnectionOptions() {
     }
   }
 
-  // Fallback to separate environment variables
   const host = process.env.REDIS_HOST || "127.0.0.1";
   const port = parseInt(process.env.REDIS_PORT ?? "6379", 10);
   const password = process.env.REDIS_PASSWORD || undefined;
@@ -84,4 +79,4 @@ function getRedisConnectionOptions() {
     BackgroundJobsService,
   ],
 })
-export class JobsModule {}
+export class JobsModule { }
